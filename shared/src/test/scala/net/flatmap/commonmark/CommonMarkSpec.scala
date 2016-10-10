@@ -1,5 +1,6 @@
 package net.flatmap.commonmark
 
+import org.parboiled2.ParseError
 import org.scalatest._
 import org.scalatest.prop._
 
@@ -11,12 +12,8 @@ class CommonMarkSpec extends FunSuite with Matchers with SpecLoader {
 
   specExamples.zipWithIndex.foreach { case ((in,out),i) =>
     test("example" + (i+1)) {
-      val p = new CommonMark(in)
-      val res = p.document.run()
-      assert(res.isSuccess)
-      res.foreach { res =>
-        Synthesis.html(res) shouldBe out
-      }
+      val res = Document(in)
+      Synthesis.html(res) shouldBe out
     }
   }
 }

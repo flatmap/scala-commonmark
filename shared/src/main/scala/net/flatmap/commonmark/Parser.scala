@@ -1,13 +1,89 @@
 package net.flatmap.commonmark
 
-import java.util.regex.Pattern
+import net.flatmap.commonmark.Line.{ATXHeading, OpeningCodeFence, SetextHeadingUnderline, ThematicBreak}
 
-import org.parboiled2._
-import shapeless._
+sealed trait ParserState {
+  def line(l: Line): ParserState
+  def blocks: Seq[Block]
+}
+
+object ParserState {
+  def empty: ParserState = Clean(Vector.empty)
+
+  case class Clean(blocks: Seq[Block]) extends ParserState {
+    def line(l: Line): ParserState = l match {
+      case BlankLine(_, _) => this
+      case ThematicBreak(break) =>
+        Clean(blocks :+ break)
+      case ATXHeading(heading) =>
+        Clean(blocks :+ heading)
+      case Line.CodeLine(s) =>
+        IndentedCode(blocks,Blocks.Code(None,s + "\n"))
+      case OpeningCodeFence(indentation,char,width,info) =>
+        FencedCode(blocks,indentation,char,width,Blocks.Code(info,""))
+      case l@Line.HTMLBlock(html, matchEnd) =>
+        if (matchEnd(l)) Clean(blocks :+ Blocks.HTML(l.content))
+        else HTMLBlock(blocks,Blocks.HTML(html),matchEnd)
+      case l =>
+        Paragraph(blocks,Vector(l))
+    }
+  }
+
+  case class Paragraph(previous: Seq[Block], uninterpreted: Seq[Line]) extends ParserState {
+    def line(l: Line): ParserState = l match {
+      case BlankLine(_,_) => Clean(blocks)
+      case SetextHeadingUnderline(level) =>
+        Clean(previous :+ Blocks.Heading(level,uninterpreted))
+      case ThematicBreak(break) =>
+        Clean(blocks :+ break)
+      case ATXHeading(heading) =>
+        Clean(blocks :+ heading)
+      case l@Line.HTMLBlock(html, matchEnd) =>
+        if (matchEnd(l)) Clean(blocks :+ Blocks.HTML(l.content))
+        else HTMLBlock(blocks,Blocks.HTML(html),matchEnd)
+      case OpeningCodeFence(indentation,char,width,info) =>
+        FencedCode(blocks,indentation,char,width,Blocks.Code(info,""))
+      case l =>
+        Paragraph(previous, uninterpreted :+ l)
+    }
+
+    def blocks: Seq[Block] =
+      if (uninterpreted.isEmpty) blocks
+      else previous :+ Blocks.Paragraph(uninterpreted)
+  }
+
+  case class IndentedCode(previous: Seq[Block], code: Blocks.Code) extends ParserState {
+    def line(l: Line): ParserState = l match {
+      case Line.CodeLine(l) => IndentedCode(previous,code.addLine(l))
+      case other => Clean(blocks).line(l)
+    }
+    def blocks = previous :+ code
+  }
+
+  case class FencedCode(previous: Seq[Block], indentation: Int, char: Char, width: Int, code: Blocks.Code) extends ParserState {
+    def line(l: Line): ParserState = l match {
+      case Line.ClosingCodeFence(c,width) if c == char && width >= this.width => Clean(blocks)
+      case other =>
+        val unindented = other.unindentBy(indentation).content
+        FencedCode(previous, indentation, char, width,code.addLine(unindented))
+    }
+
+    def blocks = previous :+ code
+  }
+
+  case class HTMLBlock(previous: Seq[Block], html: Blocks.HTML, matchEnd: Line => Boolean) extends ParserState {
+    def line(l: Line): ParserState = l match {
+      case l: BlankLine if matchEnd(l) => Clean(blocks)
+      case l: NonBlankLine if matchEnd(l) => Clean(previous :+ html.addLine(l.content))
+      case other => HTMLBlock(previous,html.addLine(other.content),matchEnd)
+    }
+    def blocks = previous :+ html
+  }
+}
 
 /**
   * Created by martin on 07/10/2016.
-  */
+
 class CommonMark(val input: ParserInput) extends Parser {
   //var nodes = Map.empty[Block]
 
@@ -28,20 +104,29 @@ class CommonMark(val input: ParserInput) extends Parser {
     * (U+000A) or carriage return (U+000D), followed by a line ending or by
     * the end of file.
     */
-  def line[T](r: Rule1[T]): Rule1[T] =
-    rule(r ~ (lineEnding | EOI))
+  def line: Rule0 = rule {
+    zeroOrMore(noneOf("\n\r")) ~ (lineEnding | EOI)
+  }
 
   /**
     * A line ending is a newline (U+000A), a carriage return (U+000D) not
     * followed by a newline, or a carriage return and a following newline.
     */
-  def lineEnding: Rule0 = rule('\n' | '\r' ~ '\n'.?)
+  def lineEnding: Rule0 = rule {
+    '\n' | '\r' ~ '\n'.?
+  }
 
   /**
     * A line containing no characters, or a line containing only spaces
     * (U+0020) or tabs (U+0009), is called a blank line.
     */
-  def blankLine: Rule0 = rule(anyOf(" \t") ~ (lineEnding | EOI))
+  def blankLine: Rule0 = rule {
+    zeroOrMore(anyOf(" \t"))
+  }
+
+  def nonBlankLine: Rule0 = rule {
+    zeroOrMore(anyOf(" \t")) ~ nonWhitespaceCharacter ~ zeroOrMore(noneOf("\n\r"))
+  }
 
   /**
     * A whitespace character is a space (U+0020), tab (U+0009), newline
@@ -80,10 +165,6 @@ class CommonMark(val input: ParserInput) extends Parser {
     */
   val nonWhitespaceCharacter = unicodeWhitespaceCharacter.negated
 
-  def nonBlankLine: Rule0 = rule {
-    anyOf(" \t\u000b\f").* ~ nonWhitespaceCharacter.+ ~ noneOf("\n\r").*
-  }
-
   /**
     * An ASCII punctuation character is !, ", #, $, %, &, ', (, ), *, +, ,,
     * -, ., /, :, ;, <, =, >, ?, @, [, \, ], ^, _, `, {, |, }, or ~.
@@ -101,14 +182,17 @@ class CommonMark(val input: ParserInput) extends Parser {
       Unicode.Po ++ Unicode.Ps
 
   def document: Rule1[Seq[Block]] = rule {
-    blankLine.* ~!~ block.*.separatedBy(lineEnding ~ blankLine.*) ~ blankLine
-      .* ~ EOI
+    zeroOrMore(blankLine) ~
+      zeroOrMore(block).separatedBy(blankLine.+) ~
+      blankLine.* ~ EOI
   }
 
   def block: Rule1[Block] = rule {
-    (thematicBreak) |
-    (atxHeading) |
     (paragraph)
+  }
+
+  private def thematicBreak(char: Char): Rule0 = rule {
+    optional(1 to 3 times space) ~ 3.times(char ~ space.*) ~ zeroOrMore(char ~ space.*)
   }
 
   /**
@@ -117,11 +201,7 @@ class CommonMark(val input: ParserInput) extends Parser {
     * optionally by any number of spaces, forms a thematic break.
     */
   def thematicBreak: Rule1[ThematicBreak.type] = rule {
-    optional(1 to 3 times space) ~
-      (('-' ~ space.* ~ '-' ~ space.* ~ '-' ~ zeroOrMore('-').separatedBy(space.*)) |
-       ('_' ~ space.* ~ '_' ~ space.* ~ '_' ~ zeroOrMore('_').separatedBy(space.*)) |
-       ('*' ~ space.* ~ '*' ~ space.* ~ '*' ~ zeroOrMore('*').separatedBy(space.*))) ~
-      space.* ~ push(ThematicBreak)
+    (thematicBreak('-') | thematicBreak('_') | thematicBreak('*')) ~ push(ThematicBreak)
   }
 
   /**
@@ -139,16 +219,48 @@ class CommonMark(val input: ParserInput) extends Parser {
   def atxHeading: Rule1[Heading] = rule {
     optional(1 to 3 times space) ~
       (( capture((1 to 6) times "#")) ~> (_.length)) ~ space ~
-      (capture(noneOf("\n\r").*) ~>
+      (capture(noneOf("\n\r").*) ~ lineEnding ~>
         (_.trim.reverse.dropWhile(_ == '#').trim.reverse)) ~> Heading
   }
 
+  /**
+    * A setext heading consists of one or more lines of text, each containing
+    * at least one non-whitespace character, with no more than 3 spaces
+    * indentation, followed by a setext heading underline. The lines of text
+    * must be such that, were they not followed by the setext heading
+    * underline, they would be interpreted as a paragraph: they cannot be
+    * interpretable as a code fence, ATX heading, block quote, thematic break,
+    * list item, or HTML block.
+    */
+  def setextHeading: Rule1[Heading] = rule {
+    capture(oneOrMore(nonBlankLine)) ~>
+      (_.mkString("\n")) ~ setextHeadingUnderline ~>
+        ((t: String,l: Int) => Heading(l,t))
+  }
 
+  /**
+    * A setext heading underline is a sequence of = characters or a sequence
+    * of - characters, with no more than 3 spaces indentation and any number
+    * of trailing spaces. If a line containing a single - can be interpreted
+    * as an empty list items, it should be interpreted this way and not as a
+    * setext heading underline.
+    */
+  def setextHeadingUnderline: Rule1[Int] = rule {
+    optional(1 to 3 times space) ~
+      (oneOrMore('=') ~ push(1) | oneOrMore('-') ~ push(2)) ~ space.* ~
+      lineEnding
+  }
 
-
-
+  /**
+    * A sequence of non-blank lines that cannot be interpreted as other kinds
+    * of blocks forms a paragraph. The contents of the paragraph are the
+    * result of parsing the paragraph’s raw content as inlines. The
+    * paragraph’s raw content is formed by concatenating the lines and
+    * removing initial and final whitespace.
+    */
   def paragraph: Rule1[Paragraph] = rule {
-    capture(nonBlankLine).+.separatedBy(lineEnding) ~>
+    oneOrMore(capture(nonBlankLine)).separatedBy(lineEnding) ~>
       ((x: Seq[String]) => Paragraph(x.map(_.trim).mkString("\n")))
   }
 }
+*/

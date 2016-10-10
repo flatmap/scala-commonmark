@@ -26,7 +26,7 @@ trait SpecLoader {
           case "." if in.isDefined && out.isEmpty =>
             (samples,(in,Some("")))
           case "````````````````````````````````" if in.isDefined && out.isDefined =>
-            (samples :+ (in.get.drop(1).replace("→","\t"),out.get.drop(1)),
+            (samples :+ (in.get.drop(1).replace("→","\t"),out.get.drop(1).replace("→","\t")),
               (None, None))
           case other if in.isDefined && out.isEmpty =>
             (samples,(in.map(_ + "\n" + other),out))
