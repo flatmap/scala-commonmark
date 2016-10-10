@@ -78,7 +78,11 @@ class CommonMark(val input: ParserInput) extends Parser {
     * A non-whitespace character is any character that is not a whitespace
     * character.
     */
-  val nonWhitespaceCharacter = whitespaceCharacter.negated
+  val nonWhitespaceCharacter = unicodeWhitespaceCharacter.negated
+
+  def nonBlankLine: Rule0 = rule {
+    anyOf(" \t\u000b\f").* ~ nonWhitespaceCharacter.+ ~ noneOf("\n\r").*
+  }
 
   /**
     * An ASCII punctuation character is !, ", #, $, %, &, ', (, ), *, +, ,,
@@ -103,6 +107,7 @@ class CommonMark(val input: ParserInput) extends Parser {
 
   def block: Rule1[Block] = rule {
     (thematicBreak) |
+    (atxHeading) |
     (paragraph)
   }
 
@@ -119,14 +124,31 @@ class CommonMark(val input: ParserInput) extends Parser {
       space.* ~ push(ThematicBreak)
   }
 
-  def paragraph: Rule1[Paragraph] = rule {
-    capture(noneOf("\n\r").*).+.separatedBy(lineEnding) ~>
-      ((x: Seq[String]) => Paragraph(x.mkString("\n")))
+  /**
+    * An ATX heading consists of a string of characters, parsed as inline
+    * content, between an opening sequence of 1–6 unescaped # characters and
+    * an optional closing sequence of any number of unescaped # characters.
+    * The opening sequence of # characters must be followed by a space or by
+    * the end of line. The optional closing sequence of #s must be preceded
+    * by a space and may be followed by spaces only. The opening # character
+    * may be indented 0-3 spaces. The raw contents of the heading are
+    * stripped of leading and trailing spaces before being parsed as inline
+    * content. The heading level is equal to the number of # characters in
+    * the opening sequence.
+    */
+  def atxHeading: Rule1[Heading] = rule {
+    optional(1 to 3 times space) ~
+      (( capture((1 to 6) times "#")) ~> (_.length)) ~ space ~
+      (capture(noneOf("\n\r").*) ~>
+        (_.trim.reverse.dropWhile(_ == '#').trim.reverse)) ~> Heading
   }
 
-  /*val atxHeading: Rule1[Heading] = rule {
-    (0 to 3 times space) ~
-      ( capture((1 to 6) times "#")) ~> (_.length)) ~
 
-  }*/
+
+
+
+  def paragraph: Rule1[Paragraph] = rule {
+    capture(nonBlankLine).+.separatedBy(lineEnding) ~>
+      ((x: Seq[String]) => Paragraph(x.map(_.trim).mkString("\n")))
+  }
 }
