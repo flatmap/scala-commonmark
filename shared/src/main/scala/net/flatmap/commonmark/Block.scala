@@ -7,6 +7,7 @@ sealed trait Block
 object Blocks {
 
   sealed trait LeafBlock extends Block
+  sealed trait ContainerBlock extends Block
 
   case object ThematicBreak extends LeafBlock
 
@@ -29,5 +30,7 @@ object Blocks {
   object Paragraph {
     def apply(lines: Seq[Line]): Paragraph = Paragraph(lines.map(_.trimmed).mkString("\n"))
   }
+
+  case class BlockQuote(blocks: Seq[Block]) extends ContainerBlock
 
 }

@@ -14,9 +14,6 @@ lazy val scalaCommonMark = crossProject.in(file(".")).
     scalaVersion := "2.11.8",
     name := "scala-commonmark",
     version := "0.1-SNAPSHOT",
-    libraryDependencies += "org.parboiled" %%% "parboiled" % "2.1.3",
-    libraryDependencies += "com.chuusai"   %%% "shapeless" % "2.3.2",
-    libraryDependencies += "org.scalactic" %%% "scalactic" % "3.0.0",
     libraryDependencies += "org.scalatest" %%% "scalatest" % "3.0.0" % "test"
   ).
   jvmSettings(

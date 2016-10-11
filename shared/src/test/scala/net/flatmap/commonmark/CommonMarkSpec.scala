@@ -1,9 +1,7 @@
 package net.flatmap.commonmark
 
-import org.parboiled2.ParseError
 import org.scalatest._
 import org.scalatest.prop._
-
 import scala.collection.immutable._
 import scala.io.Source
 

@@ -24,5 +24,8 @@ object Synthesis {
     case Blocks.Heading(l,s) => s"<h$l>${escape(s)}</h$l>"
     case Blocks.Paragraph(x) => s"<p>${escape(x)}</p>"
     case Blocks.HTML(c) => c
+    case Blocks.BlockQuote(blocks) => s"<blockquote>\n${
+      blocks.map(b => html(b) + '\n').mkString
+    }</blockquote>"
   }
 }

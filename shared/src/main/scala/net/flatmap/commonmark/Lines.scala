@@ -11,6 +11,10 @@ sealed trait Line {
 }
 
 object Line {
+  def apply(n: Int, s: String): Line =
+    if (s.exists(CharacterClasses.NonWhitespaceCharacter)) NonBlankLine(n,s)
+    else BlankLine(n,s)
+
   object ThematicBreak {
     def unapply(l: Line): Option[Blocks.ThematicBreak.type] =if (
       l.indentation <= 3 &&
@@ -78,30 +82,30 @@ object Line {
       } else None
   }
 
-  val htmlBlockRegex1 = "^(<script|<pre|<style)(>|\\s|$)".r
-  val htmlBlockRegex1Close = "(</script>|</pre>|</style>)".r
-
-  val htmlBlockRegex2 = "^<!--".r
-  val htmlBlockRegex2Close = "-->".r
-
-  val htmlBlockRegex3 = "^<\\?".r
-  val htmlBlockRegex3Close = "\\?>".r
-
-  val htmlBlockRegex4 = "^<![A-Z]".r
-  val htmlBlockRegex4Close = ">".r
-
-  val htmlBlockRegex5 = "^<!\\[CDATA\\[".r
-  val htmlBlockRegex5Close = "\\]\\]>".r
-
-  val htmlBlockRegex6 = ("^</?(address|article|aside|base|basefont|blockquote|" +
-    "body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|" +
-    "figcaption|figure|footer|form|frame|frameset|h1|head|header|hr|html|iframe|" +
-    "legend|li|link|main|menu|menuitem|meta|nav|noframes|ol|optgroup|option|p|" +
-    "param|section|source|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(\\s+|$|>|/>|)").r
-
-  //val htmlBlockRegex7 = ("^<[a-zA-Z][a-zA-Z0-9\\-]*")
-
   object HTMLBlock {
+    val htmlBlockRegex1 = "^(<script|<pre|<style)(>|\\s|$)".r
+    val htmlBlockRegex1Close = "(</script>|</pre>|</style>)".r
+
+    val htmlBlockRegex2 = "^<!--".r
+    val htmlBlockRegex2Close = "-->".r
+
+    val htmlBlockRegex3 = "^<\\?".r
+    val htmlBlockRegex3Close = "\\?>".r
+
+    val htmlBlockRegex4 = "^<![A-Z]".r
+    val htmlBlockRegex4Close = ">".r
+
+    val htmlBlockRegex5 = "^<!\\[CDATA\\[".r
+    val htmlBlockRegex5Close = "\\]\\]>".r
+
+    val htmlBlockRegex6 = ("^</?(address|article|aside|base|basefont|blockquote|" +
+      "body|caption|center|col|colgroup|dd|details|dialog|dir|div|dl|dt|fieldset|" +
+      "figcaption|figure|footer|form|frame|frameset|h1|head|header|hr|html|iframe|" +
+      "legend|li|link|main|menu|menuitem|meta|nav|noframes|ol|optgroup|option|p|" +
+      "param|section|source|summary|table|tbody|td|tfoot|th|thead|title|tr|track|ul)(\\s+|$|>|/>|)").r
+
+    //val htmlBlockRegex7 = ("^<[a-zA-Z][a-zA-Z0-9\\-]*")
+
     def unapply(l: Line): Option[(String,Line => Boolean)] =
       if (htmlBlockRegex1.findFirstMatchIn(l.content).nonEmpty)
         Some(l.content, (x: Line) => htmlBlockRegex1Close.findFirstMatchIn(x.content).nonEmpty)
@@ -117,9 +121,17 @@ object Line {
         Some(l.content, (x: Line) => x.isBlank)
       else None
   }
+
+  object BlockQuoteMarker {
+    val blockQuoteRegex = "^ ? ? ?> ?(.*)$".r
+
+    def unapply(l: Line): Option[String] =
+      blockQuoteRegex.findFirstMatchIn(l.content).map(_.group(1))
+  }
 }
 
 case class BlankLine(number: Int, content: String) extends Line
+
 case class NonBlankLine(number: Int, content: String) extends Line {
   override val isBlank: Boolean = false
 
@@ -169,8 +181,6 @@ object Lines {
     * @param input
     * @return
     */
-  def apply(input: Iterator[String]): Iterator[Line] = input.zipWithIndex.map {
-    case (x,i) if (x.exists(CharacterClasses.NonWhitespaceCharacter)) => NonBlankLine(i + 1, x)
-    case (x,i) => BlankLine(i + 1, x)
-  }
+  def apply(input: Iterator[String]): Iterator[Line] =
+    input.zipWithIndex.map{ case (x,y) => Line(y,x) }
 }

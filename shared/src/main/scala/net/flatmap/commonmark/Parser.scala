@@ -13,17 +13,19 @@ object ParserState {
   case class Clean(blocks: Seq[Block]) extends ParserState {
     def line(l: Line): ParserState = l match {
       case BlankLine(_, _) => this
-      case ThematicBreak(break) =>
+      case Line.ThematicBreak(break) =>
         Clean(blocks :+ break)
-      case ATXHeading(heading) =>
+      case Line.ATXHeading(heading) =>
         Clean(blocks :+ heading)
       case Line.CodeLine(s) =>
         IndentedCode(blocks,Blocks.Code(None,s + "\n"))
-      case OpeningCodeFence(indentation,char,width,info) =>
+      case Line.OpeningCodeFence(indentation,char,width,info) =>
         FencedCode(blocks,indentation,char,width,Blocks.Code(info,""))
       case l@Line.HTMLBlock(html, matchEnd) =>
         if (matchEnd(l)) Clean(blocks :+ Blocks.HTML(l.content))
         else HTMLBlock(blocks,Blocks.HTML(html),matchEnd)
+      case Line.BlockQuoteMarker(content) =>
+        BlockQuote(blocks,Clean(Vector.empty))
       case l =>
         Paragraph(blocks,Vector(l))
     }
@@ -34,7 +36,7 @@ object ParserState {
       case BlankLine(_,_) => Clean(blocks)
       case SetextHeadingUnderline(level) =>
         Clean(previous :+ Blocks.Heading(level,uninterpreted))
-      case ThematicBreak(break) =>
+      case Line.ThematicBreak(break) =>
         Clean(blocks :+ break)
       case ATXHeading(heading) =>
         Clean(blocks :+ heading)
@@ -78,6 +80,17 @@ object ParserState {
       case other => HTMLBlock(previous,html.addLine(other.content),matchEnd)
     }
     def blocks = previous :+ html
+  }
+
+  case class BlockQuote(previous: Seq[Block], state: ParserState) extends
+    ParserState {
+    def line(l: Line): ParserState = l match {
+      case BlankLine(_,_) => Clean(blocks)
+      case l@Line.BlockQuoteMarker(c) => BlockQuote(previous,state.line
+        (NonBlankLine(l.number,c)))
+      case other => BlockQuote(previous,state.line(l))
+    }
+    def blocks = previous :+ Blocks.BlockQuote(state.blocks)
   }
 }
 
