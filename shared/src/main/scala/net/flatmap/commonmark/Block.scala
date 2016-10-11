@@ -5,9 +5,10 @@ case class Range(from: Int, to: Int)
 sealed trait Block
 
 object Blocks {
-
   sealed trait LeafBlock extends Block
-  sealed trait ContainerBlock extends Block
+  sealed trait ContainerBlock extends Block {
+    val blocks: Seq[Block]
+  }
 
   case object ThematicBreak extends LeafBlock
 
@@ -19,6 +20,10 @@ object Blocks {
 
   case class Code(info: Option[String], content: String) extends LeafBlock {
     def addLine(s: String) = Code(info,content + s + "\n")
+    def removeTrailingNewlines = Code(info,content match {
+      case "" => ""
+      case other => other.reverse.dropWhile(_ == '\n').reverse + '\n'
+    })
   }
 
   case class HTML(content: String) extends LeafBlock {
@@ -33,4 +38,7 @@ object Blocks {
 
   case class BlockQuote(blocks: Seq[Block]) extends ContainerBlock
 
+  case class UnorderedList(marker: String, items: Seq[ListItem]) extends
+    LeafBlock
+  case class ListItem(marker: String, blocks: Seq[Block]) extends ContainerBlock
 }

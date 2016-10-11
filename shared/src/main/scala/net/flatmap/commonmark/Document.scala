@@ -10,6 +10,6 @@ object Document {
 
   def apply(lines: Iterator[Line]): Document =
     Document((lines).foldLeft(ParserState.empty) {
-    case (state,line) => state.line(line)
-  }.blocks)
+    case (state,line) => state.apply(line)
+  }.mergedBlocks)
 }

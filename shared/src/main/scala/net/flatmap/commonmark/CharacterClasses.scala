@@ -39,7 +39,6 @@ object CharacterClasses {
     */
   val Space: CharacterClass = _ == ' '
 
-
   /**
     * A non-whitespace character is any character that is not a whitespace
     * character.

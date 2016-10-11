@@ -3,16 +3,24 @@ package net.flatmap.commonmark
 import net.flatmap.commonmark.Line.{ATXHeading, OpeningCodeFence, SetextHeadingUnderline, ThematicBreak}
 
 sealed trait ParserState {
-  def line(l: Line): ParserState
+  def apply(l: Line): ParserState
   def blocks: Seq[Block]
+  def mergedBlocks: Seq[Block] = blocks.foldLeft(Vector.empty[Block]) {
+    case (bs, li: Blocks.ListItem) => bs.lastOption match {
+      case Some(Blocks.UnorderedList(marker,lis)) if marker == li.marker =>
+        bs.init :+ Blocks.UnorderedList(marker,lis :+ li)
+      case _ => bs :+ Blocks.UnorderedList(li.marker,Vector(li))
+    }
+    case (bs, other) => bs :+ other
+  }
 }
 
 object ParserState {
   def empty: ParserState = Clean(Vector.empty)
 
   case class Clean(blocks: Seq[Block]) extends ParserState {
-    def line(l: Line): ParserState = l match {
-      case BlankLine(_, _) => this
+    def apply(l: Line): ParserState = l match {
+      case Line.Blank(_, _) => this
       case Line.ThematicBreak(break) =>
         Clean(blocks :+ break)
       case Line.ATXHeading(heading) =>
@@ -24,16 +32,18 @@ object ParserState {
       case l@Line.HTMLBlock(html, matchEnd) =>
         if (matchEnd(l)) Clean(blocks :+ Blocks.HTML(l.content))
         else HTMLBlock(blocks,Blocks.HTML(html),matchEnd)
-      case Line.BlockQuoteMarker(content) =>
-        BlockQuote(blocks,Clean(Vector.empty))
+      case l@Line.BlockQuoteMarker(_) =>
+        BlockQuote(blocks,Clean(Vector.empty)).apply(l)
+      case Line.UnorderedListMarker(ch,l,f) =>
+        ListItem(blocks,ch.toString,Clean(Vector.empty).apply(l),f)
       case l =>
         Paragraph(blocks,Vector(l))
     }
   }
 
   case class Paragraph(previous: Seq[Block], uninterpreted: Seq[Line]) extends ParserState {
-    def line(l: Line): ParserState = l match {
-      case BlankLine(_,_) => Clean(blocks)
+    def apply(l: Line): ParserState = l match {
+      case l: Line.Blank => Clean(blocks)
       case SetextHeadingUnderline(level) =>
         Clean(previous :+ Blocks.Heading(level,uninterpreted))
       case Line.ThematicBreak(break) =>
@@ -45,6 +55,8 @@ object ParserState {
         else HTMLBlock(blocks,Blocks.HTML(html),matchEnd)
       case OpeningCodeFence(indentation,char,width,info) =>
         FencedCode(blocks,indentation,char,width,Blocks.Code(info,""))
+      case l@Line.BlockQuoteMarker(_) =>
+        BlockQuote(blocks,Clean(Vector.empty)).apply(l)
       case l =>
         Paragraph(previous, uninterpreted :+ l)
     }
@@ -55,15 +67,15 @@ object ParserState {
   }
 
   case class IndentedCode(previous: Seq[Block], code: Blocks.Code) extends ParserState {
-    def line(l: Line): ParserState = l match {
+    def apply(l: Line): ParserState = l match {
       case Line.CodeLine(l) => IndentedCode(previous,code.addLine(l))
-      case other => Clean(blocks).line(l)
+      case other => Clean(blocks).apply(l)
     }
-    def blocks = previous :+ code
+    def blocks = previous :+ code.removeTrailingNewlines
   }
 
   case class FencedCode(previous: Seq[Block], indentation: Int, char: Char, width: Int, code: Blocks.Code) extends ParserState {
-    def line(l: Line): ParserState = l match {
+    def apply(l: Line): ParserState = l match {
       case Line.ClosingCodeFence(c,width) if c == char && width >= this.width => Clean(blocks)
       case other =>
         val unindented = other.unindentBy(indentation).content
@@ -74,23 +86,43 @@ object ParserState {
   }
 
   case class HTMLBlock(previous: Seq[Block], html: Blocks.HTML, matchEnd: Line => Boolean) extends ParserState {
-    def line(l: Line): ParserState = l match {
-      case l: BlankLine if matchEnd(l) => Clean(blocks)
-      case l: NonBlankLine if matchEnd(l) => Clean(previous :+ html.addLine(l.content))
+    def apply(l: Line): ParserState = l match {
+      case l: Line.Blank if matchEnd(l) => Clean(blocks)
+      case l: Line.NonBlank if matchEnd(l) => Clean(previous :+ html.addLine(l
+        .content))
       case other => HTMLBlock(previous,html.addLine(other.content),matchEnd)
     }
     def blocks = previous :+ html
   }
 
-  case class BlockQuote(previous: Seq[Block], state: ParserState) extends
+  case class BlockQuote(previous: Seq[Block], state: ParserState, wasBlank: Boolean = false) extends
     ParserState {
-    def line(l: Line): ParserState = l match {
-      case BlankLine(_,_) => Clean(blocks)
-      case l@Line.BlockQuoteMarker(c) => BlockQuote(previous,state.line
-        (NonBlankLine(l.number,c)))
-      case other => BlockQuote(previous,state.line(l))
+    def apply(l: Line): ParserState = l match {
+      case Line.Blank(_,_) => Clean(blocks)
+      case Line.BlockQuoteMarker(l@Line.Blank(_,_)) =>
+        BlockQuote(previous,state.apply(l),true)
+      case Line.BlockQuoteMarker(l) =>
+        BlockQuote(previous,state.apply(l))
+      case other if wasBlank => Clean(blocks).apply(other)
+      case other =>
+        Clean(blocks).apply(other) match {
+          case Clean(x) => Clean(x)
+          case other => BlockQuote(previous,state.apply(l))
+        }
     }
-    def blocks = previous :+ Blocks.BlockQuote(state.blocks)
+    def blocks = previous :+ Blocks.BlockQuote(state.mergedBlocks)
+  }
+
+  case class ListItem(previous: Seq[Block],
+                      marker: String,
+                      state: ParserState,
+                      unindent: Line => Option[Line]) extends ParserState {
+    def apply(l: Line): ParserState = unindent(l) match {
+      case None => Clean(blocks).apply(l)
+      case Some(ln) => ListItem(previous,marker,state.apply(ln),unindent)
+    }
+
+    def blocks = previous :+ Blocks.ListItem(marker,state.mergedBlocks)
   }
 }
 
