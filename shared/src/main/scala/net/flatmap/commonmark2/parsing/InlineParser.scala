@@ -12,26 +12,42 @@ case class InlineParser(input: ParserInput) extends Parser {
   }
 
   def lineBreak: Rule1[Inline] = rule {
-    "\\\n" ~ push(Inline.LineBreak)
+    ("\\\n" | "  \n") ~ push(Inline.LineBreak)
   }
 
   def htmlEntity: Rule1[String] = rule {
-    (capture('&' ~ CharPredicate.AlphaNum.* ~ ';') ~> { name =>
+    entityReference |
+    decimalNumericCharacter |
+    hexadecimalNumericCharacter
+  }
+
+  def entityReference: Rule1[String] = rule {
+    capture('&' ~ CharPredicate.AlphaNum.* ~ ';') ~> { name =>
       val decoded = HTMLEntities.entities.get(name)
       test(decoded.isDefined) ~ push(decoded.get)
-    }) |
-    ("&#" ~ capture((1 to 8).times(CharPredicate.Digit)) ~> { s =>
+    }
+  }
+
+  def decimalNumericCharacter: Rule1[String] = rule {
+    "&#" ~ capture((1 to 8).times(CharPredicate.Digit)) ~> { s =>
       val i = s.toInt
       if (i > 0 && java.lang.Character.isValidCodePoint(i))
         java.lang.Character.toChars(i).mkString
       else "\uFFFD"
-    } ~ ';') |
-    ("&#" ~ ("X" | "x") ~ capture((1 to 8).times(CharPredicate.HexDigit))
-      ~> { s =>
+    } ~ ';'
+  }
+
+  def hexadecimalNumericCharacter: Rule1[String] = rule {
+    "&#" ~ ("X" | "x") ~
+      capture((1 to 8).times(CharPredicate.HexDigit)) ~> { s =>
       val i = Integer.parseInt(s,16)
       if (i > 0 && java.lang.Character.isValidCodePoint(i))
         java.lang.Character.toChars(i).mkString
       else "\uFFFD"
-    } ~ ';')
+    } ~ ';'
+  }
+
+  def backtickString: Rule1[Int] = rule {
+    capture(oneOrMore('`'))  ~ !'`' ~> (_.length)
   }
 }
