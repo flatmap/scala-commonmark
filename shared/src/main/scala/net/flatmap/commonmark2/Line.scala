@@ -16,7 +16,5 @@ case class LineView(firstColumn: Int, origin: OriginalLine) extends Line {
 }
 
 object Line {
-  object Blank {
-    def unapply(l: Line)
-  }
+
 }
